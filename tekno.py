@@ -32,9 +32,9 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # --- FUNGSI GOOGLE DRIVE API ---
 def get_drive_service():
-    """Inisialisasi koneksi ke Google Drive Service Account dengan perbaikan Private Key"""
+    """Mengambil koneksi Google Drive via file credentials.json atau Streamlit Secrets"""
     try:
-        # 1. Cek file lokal credentials.json
+        # Prioritas 1: Baca langsung dari file credentials.json di repositori
         if os.path.exists(CREDENTIALS_FILE):
             creds = service_account.Credentials.from_service_account_file(
                 CREDENTIALS_FILE,
@@ -42,12 +42,9 @@ def get_drive_service():
             )
             return build('drive', 'v3', credentials=creds)
         
-        # 2. Cek Streamlit Secrets (Cloud)
+        # Prioritas 2: Streamlit Secrets
         elif "gcp_service_account" in st.secrets:
-            # Mengubah format secrets menjadi dictionary
             service_account_info = dict(st.secrets["gcp_service_account"])
-            
-            # Memperbaiki karakter newline (\n) pada private_key yang terdistorsi
             if "private_key" in service_account_info:
                 service_account_info["private_key"] = service_account_info["private_key"].replace("\\n", "\n")
                 
@@ -57,40 +54,41 @@ def get_drive_service():
             )
             return build('drive', 'v3', credentials=creds)
         else:
-            st.error("⚠️ Kredensial tidak ditemukan di Secrets atau credentials.json!")
+            st.error("❌ File credentials.json tidak ditemukan di repositori GitHub!")
             return None
     except Exception as e:
-        st.error(f"❌ Gagal Koneksi Drive API: {e}")
+        st.error(f"❌ Autentikasi Google Drive Gagal: {e}")
         return None
 
 def upload_to_google_drive(file_path, file_name, folder_id):
-    """Mengunggah file ke folder Google Drive"""
-    # Bersihkan ID Folder dari URL parameter
+    """Mengunggah file ke folder Google Drive dan menampilkan pesan status"""
+    # Bersihkan ID Folder dari URL parameter jika ada
     if folder_id and "?" in folder_id:
         folder_id = folder_id.split("?")[0]
-        
-    if (not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI") and "DRIVE_FOLDER_ID" in st.secrets:
-        folder_id = st.secrets["DRIVE_FOLDER_ID"]
 
     service = get_drive_service()
-    if service and folder_id:
-        try:
-            file_metadata = {
-                'name': file_name,
-                'parents': [folder_id]
-            }
-            media = MediaFileUpload(file_path, resumable=True)
-            file = service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
-            return file.get('id')
-        except Exception as e:
-            st.error(f"❌ Error Upload Drive: {e}")
-            return None
-    return None
+    if not service:
+        st.error("❌ Tidak dapat menghubungkan ke Google Drive (Service NULL).")
+        return None
 
+    try:
+        file_metadata = {
+            'name': file_name,
+            'parents': [folder_id]
+        }
+        media = MediaFileUpload(file_path, resumable=True)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        drive_file_id = file.get('id')
+        st.toast(f"✅ Berhasil backup ke Drive! File ID: {drive_file_id}")
+        return drive_file_id
+    except Exception as e:
+        st.error(f"❌ Perintah Upload Drive Gagal: {e}")
+        return None
 def delete_from_google_drive(drive_id):
     """Menghapus file dari Google Drive berdasarkan ID"""
     if not drive_id:
