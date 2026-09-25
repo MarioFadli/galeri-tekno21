@@ -32,41 +32,48 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # --- FUNGSI GOOGLE DRIVE API ---
 def get_drive_service():
-    """Inisialisasi koneksi ke Google Drive Service Account dengan penanganan error"""
+    """Inisialisasi koneksi ke Google Drive Service Account dengan perbaikan Private Key"""
     try:
+        # 1. Cek file lokal credentials.json
         if os.path.exists(CREDENTIALS_FILE):
             creds = service_account.Credentials.from_service_account_file(
                 CREDENTIALS_FILE,
-                scopes=['https://www.googleapis.com/auth/drive.file']
+                scopes=['https://www.googleapis.com/auth/drive']
             )
             return build('drive', 'v3', credentials=creds)
+        
+        # 2. Cek Streamlit Secrets (Cloud)
         elif "gcp_service_account" in st.secrets:
+            # Mengubah format secrets menjadi dictionary
+            service_account_info = dict(st.secrets["gcp_service_account"])
+            
+            # Memperbaiki karakter newline (\n) pada private_key yang terdistorsi
+            if "private_key" in service_account_info:
+                service_account_info["private_key"] = service_account_info["private_key"].replace("\\n", "\n")
+                
             creds = service_account.Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]),
-                scopes=['https://www.googleapis.com/auth/drive.file']
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/drive']
             )
             return build('drive', 'v3', credentials=creds)
         else:
-            st.error("⚠️ Kredensial Google Drive tidak ditemukan! Harap sediakan 'credentials.json' atau atur '[gcp_service_account]' di Streamlit Secrets.")
+            st.error("⚠️ Kredensial tidak ditemukan di Secrets atau credentials.json!")
             return None
     except Exception as e:
-        st.error(f"❌ Gagal Inisialisasi Google Drive API: {e}")
+        st.error(f"❌ Gagal Koneksi Drive API: {e}")
         return None
 
 def upload_to_google_drive(file_path, file_name, folder_id):
     """Mengunggah file ke folder Google Drive"""
+    # Bersihkan ID Folder dari URL parameter
     if folder_id and "?" in folder_id:
         folder_id = folder_id.split("?")[0]
         
     if (not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI") and "DRIVE_FOLDER_ID" in st.secrets:
         folder_id = st.secrets["DRIVE_FOLDER_ID"]
 
-    if not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI":
-        st.error("⚠️ ID Folder Google Drive belum diisi atau tidak valid!")
-        return None
-
     service = get_drive_service()
-    if service:
+    if service and folder_id:
         try:
             file_metadata = {
                 'name': file_name,
@@ -80,7 +87,7 @@ def upload_to_google_drive(file_path, file_name, folder_id):
             ).execute()
             return file.get('id')
         except Exception as e:
-            st.error(f"❌ Gagal upload ke Google Drive: {e}")
+            st.error(f"❌ Error Upload Drive: {e}")
             return None
     return None
 
