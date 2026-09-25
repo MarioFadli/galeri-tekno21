@@ -3,6 +3,9 @@ import json
 import os
 import hashlib
 from datetime import datetime
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 # Setup Konfigurasi Halaman
 st.set_page_config(
@@ -11,11 +14,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# Folder Penyimpanan File
+# --- MASUKKAN ID FOLDER GOOGLE DRIVE KAMU DI SINI ---
+DRIVE_FOLDER_ID = "1E-4Mmx_YARr7Gqv00zuoLY2T13yPXSoH?hl=ID"
+
+# Folder Penyimpanan File Lokal & JSON
 UPLOAD_DIR = "uploads"
 AUDIO_DIR = "audio"
 DATA_FILE = "intelligence_data.json"
 USER_FILE = "users_db.json"
+CREDENTIALS_FILE = "credentials.json"
 
 # Master Password Global untuk Registrasi
 REGISTRATION_MASTER_KEY = "teknologi@2024"
@@ -23,18 +30,46 @@ REGISTRATION_MASTER_KEY = "teknologi@2024"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# Fungsi untuk Memindai File Lagu dari Folder audio/
-def get_uploaded_audio_files():
-    if os.path.exists(AUDIO_DIR):
-        files = [f for f in os.listdir(AUDIO_DIR) if f.lower().endswith(('.mp3', '.wav'))]
-        return files
-    return []
+# --- FUNGSI GOOGLE DRIVE API ---
+def get_drive_service():
+    """Inisialisasi koneksi ke Google Drive Service Account"""
+    if os.path.exists(CREDENTIALS_FILE):
+        creds = service_account.Credentials.from_service_account_file(
+            CREDENTIALS_FILE,
+            scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        return build('drive', 'v3', credentials=creds)
+    elif "gcp_service_account" in st.secrets:
+        # Untuk Streamlit Community Cloud (Secrets)
+        creds = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        return build('drive', 'v3', credentials=creds)
+    return None
 
-# Helper untuk Hashing Password
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+def upload_to_google_drive(file_path, file_name, folder_id):
+    """Mengunggah file ke folder Google Drive"""
+    service = get_drive_service()
+    if service and folder_id and folder_id != "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI":
+        try:
+            file_metadata = {
+                'name': file_name,
+                'parents': [folder_id]
+            }
+            media = MediaFileUpload(file_path, resumable=True)
+            file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+            return file.get('id')
+        except Exception as e:
+            st.error(f"Gagal upload ke Google Drive: {e}")
+            return None
+    return None
 
-# Fungsi Load & Save Data
+# --- HELPER DATABASE LOCAL ---
 def load_json(filepath):
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
@@ -45,14 +80,22 @@ def save_json(filepath, data):
     with open(filepath, "w") as f:
         json.dump(data, f, indent=4)
 
-# Inisialisasi Database dalam Session State
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def get_uploaded_audio_files():
+    if os.path.exists(AUDIO_DIR):
+        files = [f for f in os.listdir(AUDIO_DIR) if f.lower().endswith(('.mp3', '.wav'))]
+        return files
+    return []
+
+# --- INIT SESSION STATE ---
 if "users" not in st.session_state:
     st.session_state.users = load_json(USER_FILE)
 
 if "memories" not in st.session_state:
     st.session_state.memories = load_json(DATA_FILE)
 
-# Mendapatkan daftar lagu lokal yang telah terunggah
 uploaded_songs = get_uploaded_audio_files()
 
 if "active_audio" not in st.session_state:
@@ -64,18 +107,22 @@ if "active_audio" not in st.session_state:
 if "logged_user" not in st.session_state:
     st.session_state.logged_user = None
 
-# --- STYLING CSS MODERN GLASSMORPHISM & NEON GRADIENT ---
+# --- STYLING CSS MODERN GLASSMORPHISM & SEMBUNYIKAN HEADER GITHUB ---
 st.markdown("""
     <style>
-    /* 1. Background Utama - Deep Cyber Nebula Gradient */
+    /* Sembunyikan Header Bawaan Streamlit (Termasuk Ikon GitHub) */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+
+    /* Background Utama */
     .stApp {
         background: radial-gradient(circle at 20% 20%, #1e1b4b 0%, #0f172a 40%, #020617 100%) !important;
         background-attachment: fixed !important;
         color: #f8fafc !important;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
     }
     
-    /* 2. Sidebar Glassmorphism */
+    /* Sidebar Glassmorphism */
     [data-testid="stSidebar"] {
         background: rgba(15, 23, 42, 0.75) !important;
         backdrop-filter: blur(16px) saturate(180%) !important;
@@ -85,45 +132,36 @@ st.markdown("""
         color: #f1f5f9 !important;
     }
 
-    /* 3. Typography & Judul */
+    /* Typography */
     h1 {
         background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 800 !important;
-        letter-spacing: -0.5px;
-        margin-bottom: 0px !important;
     }
     
-    h2, h3 {
-        color: #38bdf8 !important;
-        font-weight: 700 !important;
-    }
+    h2, h3 { color: #38bdf8 !important; }
 
     .names-badge {
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         padding: 12px 18px;
-        margin-top: 10px;
-        margin-bottom: 25px;
-        font-size: 0.9rem;
+        margin-bottom: 20px;
         color: #cbd5e1 !important;
         backdrop-filter: blur(8px);
-        line-height: 1.6;
     }
 
-    /* 4. Form Container Glassmorphism */
+    /* Form Container */
     [data-testid="stForm"] {
         background: rgba(30, 41, 59, 0.5) !important;
         border-radius: 16px !important;
-        padding: 28px !important;
+        padding: 24px !important;
         border: 1px solid rgba(56, 189, 248, 0.25) !important;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
         backdrop-filter: blur(12px) !important;
     }
 
-    /* 5. Inputs (Text, Password, Textarea) Rapi & Elegan */
+    /* Inputs */
     div[data-baseweb="input"] > div, 
     div[data-baseweb="textarea"] > div,
     input, textarea {
@@ -132,87 +170,33 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.15) !important;
         border-radius: 10px !important;
     }
-    input:focus, textarea:focus {
-        border-color: #38bdf8 !important;
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.3) !important;
-    }
 
-    /* 6. Buttons Styling */
+    /* Buttons */
     .stButton > button, div[data-testid="stFormSubmitButton"] > button {
         background: linear-gradient(135deg, #0284c7 0%, #6366f1 100%) !important;
         color: #ffffff !important;
         border: none !important;
         border-radius: 10px !important;
-        padding: 10px 24px !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3) !important;
-    }
-    .stButton > button:hover, div[data-testid="stFormSubmitButton"] > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5) !important;
-    }
-
-    /* 7. Tabs (Login / Register) */
-    button[data-baseweb="tab"] {
-        background-color: transparent !important;
-        border-bottom: 2px solid transparent !important;
-        color: #94a3b8 !important;
         font-weight: 600 !important;
     }
-    button[aria-selected="true"] {
-        border-bottom: 2px solid #38bdf8 !important;
-    }
-    button[aria-selected="true"] p {
-        color: #38bdf8 !important;
-    }
 
-    /* 8. Warning & Info Notification Box */
-    div[data-testid="stNotification"] {
-        background: rgba(245, 158, 11, 0.1) !important;
-        border: 1px solid rgba(245, 158, 11, 0.4) !important;
-        border-radius: 12px !important;
-        backdrop-filter: blur(8px) !important;
-    }
-    div[data-testid="stNotification"] * {
-        color: #fbbf24 !important;
-    }
-
-    /* 9. Card Foto Kenangan (Glassmorphism + Hover Effect) */
+    /* Card Foto */
     .memory-card {
         background: rgba(30, 41, 59, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 16px;
         padding: 16px;
         margin-bottom: 20px;
-        transition: all 0.3s ease;
         backdrop-filter: blur(10px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-    }
-    .memory-card:hover {
-        transform: translateY(-5px);
-        border-color: rgba(56, 189, 248, 0.5);
-        box-shadow: 0 15px 30px rgba(56, 189, 248, 0.2);
     }
 
     .badge-uploader {
-        display: inline-block;
         background: rgba(56, 189, 248, 0.15);
         color: #38bdf8;
         border: 1px solid rgba(56, 189, 248, 0.3);
         padding: 4px 12px;
         border-radius: 20px;
         font-size: 0.8rem;
-        font-weight: 600;
-        margin-top: 8px;
-    }
-
-    /* File Uploader Container Fix */
-    [data-testid="stFileUploader"] {
-        background: rgba(15, 23, 42, 0.5) !important;
-        border: 1px dashed rgba(255, 255, 255, 0.2) !important;
-        border-radius: 12px !important;
-        padding: 10px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -232,19 +216,16 @@ st.sidebar.markdown("---")
 
 # Pemutar Musik
 st.sidebar.markdown("### 🎵 Musik Latar")
-
 current_audio = st.session_state.active_audio
 
 if current_audio and os.path.exists(current_audio):
-    st.sidebar.audio(current_audio, autoplay=True)
-elif current_audio and current_audio.startswith("http"):
     st.sidebar.audio(current_audio, autoplay=True)
 else:
     st.sidebar.info("💡 Belum ada lagu terunggah. Silakan upload file lagu MP3/WAV di bawah.")
 
 # Pengaturan Musik
 st.sidebar.markdown("#### ⚙️ Ganti / Tambah Musik")
-audio_source_type = st.sidebar.radio("Sumber Audio:", ["Upload File MP3", "Pilih Playlist", "URL Link MP3"])
+audio_source_type = st.sidebar.radio("Sumber Audio:", ["Upload File MP3", "Pilih Playlist"])
 
 if audio_source_type == "Upload File MP3":
     uploaded_audio = st.sidebar.file_uploader("Upload File Lagu (.mp3, .wav):", type=["mp3", "wav"])
@@ -253,13 +234,16 @@ if audio_source_type == "Upload File MP3":
             audio_path = os.path.join(AUDIO_DIR, uploaded_audio.name)
             with open(audio_path, "wb") as f:
                 f.write(uploaded_audio.getbuffer())
+            
+            # Backup Lagu ke Google Drive
+            upload_to_google_drive(audio_path, uploaded_audio.name, DRIVE_FOLDER_ID)
+            
             st.session_state.active_audio = audio_path
-            st.sidebar.success(f"Lagu '{uploaded_audio.name}' Berhasil Diputar!")
+            st.sidebar.success(f"Lagu '{uploaded_audio.name}' Berhasil Diputar & Disimpan!")
             st.rerun()
 
 elif audio_source_type == "Pilih Playlist":
     available_songs = get_uploaded_audio_files()
-    
     if available_songs:
         selected_song = st.sidebar.selectbox("Pilih Lagu (Terupload):", available_songs)
         if st.sidebar.button("Putar Lagu Terpilih"):
@@ -268,14 +252,6 @@ elif audio_source_type == "Pilih Playlist":
             st.rerun()
     else:
         st.sidebar.warning("⚠️ Belum ada file lagu di folder 'audio'. Upload lagu terlebih dahulu!")
-
-else:
-    new_url = st.sidebar.text_input("Masukkan URL Link Audio MP3:")
-    if st.sidebar.button("Set Audio Link"):
-        if new_url:
-            st.session_state.active_audio = new_url
-            st.sidebar.success("Frekuensi Audio Diperbarui!")
-            st.rerun()
 
 # --- HEADER UTAMA ---
 st.title("🎓 GALERI KENANGAN PRODI TEKNOLOGI 21")
@@ -332,11 +308,11 @@ if not st.session_state.logged_user:
                     st.error("Harap Isi Semua Bidang Registration!")
 
 else:
-    # --- JIKA SUDAH LOGIN: TAMPILKAN METRIK, FORM UNGGAH & GALERI FOTO ---
+    # --- GALERI & UNGGAH FOTO ---
     col_m1, col_m2, col_m3 = st.columns(3)
     col_m1.metric("Total Arsip Foto", f"{len(st.session_state.memories)} Foto")
     col_m2.metric("Anggota Terdaftar", f"{len(st.session_state.users)} Akun")
-    col_m3.metric("Status Server", "Online 🟢")
+    col_m3.metric("Status Cloud Drive", "Terhubung ☁️")
 
     st.markdown("---")
 
@@ -354,16 +330,24 @@ else:
                     with open(img_path, "wb") as f:
                         f.write(uploaded_img.getbuffer())
                     
+                    # 🚀 AUTO-UPLOAD KE GOOGLE DRIVE
+                    drive_id = upload_to_google_drive(img_path, uploaded_img.name, DRIVE_FOLDER_ID)
+                    
                     new_memory = {
                         "agent": st.session_state.logged_user,
                         "caption": caption,
                         "image_path": img_path,
+                        "drive_id": drive_id,
                         "timestamp": datetime.now().strftime("%d-%m-%Y %H:%M")
                     }
                     
                     st.session_state.memories.append(new_memory)
                     save_json(DATA_FILE, st.session_state.memories)
-                    st.success("Foto Berhasil Disimpan Ke Galeri!")
+                    
+                    if drive_id:
+                        st.success("Foto Berhasil Disimpan di Lokal & Google Drive!")
+                    else:
+                        st.success("Foto Berhasil Disimpan di Lokal!")
                     st.rerun()
                 else:
                     st.error("Deskripsi dan File Foto Wajib Diisi!")
@@ -386,7 +370,7 @@ else:
                 else:
                     st.warning("⚠️ File Foto Tidak Ditemukan")
                 
-                st.markdown(f"<p style='margin-top:10px; font-weight:600; color:#f8fafc;'>{item['caption']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='margin-top:10px; font-weight:600;'>{item['caption']}</p>", unsafe_allow_html=True)
                 st.markdown(f"<span class='badge-uploader'>👤 {item['agent']}</span>", unsafe_allow_html=True)
                 st.caption(f"🕒 {item['timestamp']}")
                 st.markdown('</div>', unsafe_allow_html=True)
