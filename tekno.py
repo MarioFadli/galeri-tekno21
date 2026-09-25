@@ -15,7 +15,6 @@ st.set_page_config(
 )
 
 # --- MASUKKAN ID FOLDER GOOGLE DRIVE KAMU DI SINI ---
-# Bersihkan dari parameter URL seperti ?hl=ID
 DRIVE_FOLDER_ID = "1E-4Mmx_YARr7Gqv00zuoLY2T13yPXSoH"
 
 # Folder Penyimpanan File Lokal & JSON
@@ -35,15 +34,12 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 def get_drive_service():
     """Inisialisasi koneksi ke Google Drive Service Account dengan penanganan error"""
     try:
-        # 1. Cek file lokal credentials.json
         if os.path.exists(CREDENTIALS_FILE):
             creds = service_account.Credentials.from_service_account_file(
                 CREDENTIALS_FILE,
                 scopes=['https://www.googleapis.com/auth/drive.file']
             )
             return build('drive', 'v3', credentials=creds)
-        
-        # 2. Cek Streamlit Secrets (Cloud)
         elif "gcp_service_account" in st.secrets:
             creds = service_account.Credentials.from_service_account_info(
                 dict(st.secrets["gcp_service_account"]),
@@ -59,11 +55,9 @@ def get_drive_service():
 
 def upload_to_google_drive(file_path, file_name, folder_id):
     """Mengunggah file ke folder Google Drive"""
-    # Otomatis bersihkan parameter URL seperti ?hl=ID dari ID folder
     if folder_id and "?" in folder_id:
         folder_id = folder_id.split("?")[0]
         
-    # Ambil dari Secrets jika ID folder di kode belum valid
     if (not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI") and "DRIVE_FOLDER_ID" in st.secrets:
         folder_id = st.secrets["DRIVE_FOLDER_ID"]
 
@@ -89,6 +83,17 @@ def upload_to_google_drive(file_path, file_name, folder_id):
             st.error(f"❌ Gagal upload ke Google Drive: {e}")
             return None
     return None
+
+def delete_from_google_drive(drive_id):
+    """Menghapus file dari Google Drive berdasarkan ID"""
+    if not drive_id:
+        return
+    service = get_drive_service()
+    if service:
+        try:
+            service.files().delete(fileId=drive_id).execute()
+        except Exception as e:
+            st.warning(f"⚠️ Foto dihapus dari lokal, tapi gagal menghapus file dari Drive: {e}")
 
 # --- HELPER DATABASE LOCAL ---
 def load_json(filepath):
@@ -131,7 +136,7 @@ if "logged_user" not in st.session_state:
 # --- STYLING CSS MODERN GLASSMORPHISM & SEMBUNYIKAN HEADER GITHUB ---
 st.markdown("""
     <style>
-    /* Sembunyikan Header Bawaan Streamlit (Termasuk Ikon GitHub) */
+    /* Sembunyikan Header Bawaan Streamlit */
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     footer {visibility: hidden;}
@@ -207,7 +212,7 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 16px;
         padding: 16px;
-        margin-bottom: 20px;
+        margin-bottom: 10px;
         backdrop-filter: blur(10px);
     }
 
@@ -368,7 +373,7 @@ else:
                     if drive_id:
                         st.success("Foto Berhasil Disimpan di Lokal & Google Drive!")
                     else:
-                        st.warning("Foto Berhasil Disimpan di Lokal, Namun Gagal Terunggah ke Google Drive. Cek Pesan Error di Atas!")
+                        st.warning("Foto Berhasil Disimpan di Lokal, Namun Gagal Terunggah ke Google Drive.")
                     st.rerun()
                 else:
                     st.error("Deskripsi dan File Foto Wajib Diisi!")
@@ -382,16 +387,46 @@ else:
         st.info("Belum ada kenangan yang diunggah. Jadilah yang pertama!")
     else:
         cols = st.columns(3)
-        for index, item in enumerate(reversed(memories)):
+        # Urutkan foto dari yang terbaru
+        reversed_memories = list(reversed(memories))
+        
+        for index, item in enumerate(reversed_memories):
             col = cols[index % 3]
             with col:
                 st.markdown('<div class="memory-card">', unsafe_allow_html=True)
                 if os.path.exists(item["image_path"]):
                     st.image(item["image_path"], use_container_width=True)
                 else:
-                    st.warning("⚠️ File Foto Tidak Ditemukan")
+                    st.warning("⚠️ File Foto Tidak Ditemukan di Lokal")
                 
                 st.markdown(f"<p style='margin-top:10px; font-weight:600;'>{item['caption']}</p>", unsafe_allow_html=True)
                 st.markdown(f"<span class='badge-uploader'>👤 {item['agent']}</span>", unsafe_allow_html=True)
                 st.caption(f"🕒 {item['timestamp']}")
                 st.markdown('</div>', unsafe_allow_html=True)
+                
+                # --- FITUR FITUR HAPUS FOTO ---
+                # Mengizinkan hapus jika akun yang login adalah pembuat foto atau akun 'MARIO'
+                current_user = st.session_state.logged_user
+                if current_user == item['agent'] or current_user.upper() == "MARIO":
+                    # Kunci unik untuk tombol hapus
+                    delete_key = f"del_{item['timestamp']}_{index}"
+                    
+                    if st.button("🗑️ Hapus Foto", key=delete_key, use_container_width=True):
+                        # 1. Hapus dari Google Drive jika ada ID Drive
+                        if item.get("drive_id"):
+                            delete_from_google_drive(item["drive_id"])
+                        
+                        # 2. Hapus file gambar lokal
+                        if os.path.exists(item["image_path"]):
+                            try:
+                                os.remove(item["image_path"])
+                            except Exception as e:
+                                pass
+                                
+                        # 3. Hapus record dari JSON
+                        st.session_state.memories.remove(item)
+                        save_json(DATA_FILE, st.session_state.memories)
+                        
+                        st.success("Foto berhasil dihapus!")
+                        st.rerun()
+                st.markdown("---")
