@@ -15,7 +15,8 @@ st.set_page_config(
 )
 
 # --- MASUKKAN ID FOLDER GOOGLE DRIVE KAMU DI SINI ---
-DRIVE_FOLDER_ID = "1E-4Mmx_YARr7Gqv00zuoLY2T13yPXSoH?hl=ID"
+# Bersihkan dari parameter URL seperti ?hl=ID
+DRIVE_FOLDER_ID = "1E-4Mmx_YARr7Gqv00zuoLY2T13yPXSoH"
 
 # Folder Penyimpanan File Lokal & JSON
 UPLOAD_DIR = "uploads"
@@ -32,26 +33,46 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # --- FUNGSI GOOGLE DRIVE API ---
 def get_drive_service():
-    """Inisialisasi koneksi ke Google Drive Service Account"""
-    if os.path.exists(CREDENTIALS_FILE):
-        creds = service_account.Credentials.from_service_account_file(
-            CREDENTIALS_FILE,
-            scopes=['https://www.googleapis.com/auth/drive.file']
-        )
-        return build('drive', 'v3', credentials=creds)
-    elif "gcp_service_account" in st.secrets:
-        # Untuk Streamlit Community Cloud (Secrets)
-        creds = service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=['https://www.googleapis.com/auth/drive.file']
-        )
-        return build('drive', 'v3', credentials=creds)
-    return None
+    """Inisialisasi koneksi ke Google Drive Service Account dengan penanganan error"""
+    try:
+        # 1. Cek file lokal credentials.json
+        if os.path.exists(CREDENTIALS_FILE):
+            creds = service_account.Credentials.from_service_account_file(
+                CREDENTIALS_FILE,
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+            return build('drive', 'v3', credentials=creds)
+        
+        # 2. Cek Streamlit Secrets (Cloud)
+        elif "gcp_service_account" in st.secrets:
+            creds = service_account.Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]),
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+            return build('drive', 'v3', credentials=creds)
+        else:
+            st.error("⚠️ Kredensial Google Drive tidak ditemukan! Harap sediakan 'credentials.json' atau atur '[gcp_service_account]' di Streamlit Secrets.")
+            return None
+    except Exception as e:
+        st.error(f"❌ Gagal Inisialisasi Google Drive API: {e}")
+        return None
 
 def upload_to_google_drive(file_path, file_name, folder_id):
     """Mengunggah file ke folder Google Drive"""
+    # Otomatis bersihkan parameter URL seperti ?hl=ID dari ID folder
+    if folder_id and "?" in folder_id:
+        folder_id = folder_id.split("?")[0]
+        
+    # Ambil dari Secrets jika ID folder di kode belum valid
+    if (not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI") and "DRIVE_FOLDER_ID" in st.secrets:
+        folder_id = st.secrets["DRIVE_FOLDER_ID"]
+
+    if not folder_id or folder_id == "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI":
+        st.error("⚠️ ID Folder Google Drive belum diisi atau tidak valid!")
+        return None
+
     service = get_drive_service()
-    if service and folder_id and folder_id != "MASUKKAN_ID_FOLDER_DRIVE_KAMU_DI_SINI":
+    if service:
         try:
             file_metadata = {
                 'name': file_name,
@@ -65,7 +86,7 @@ def upload_to_google_drive(file_path, file_name, folder_id):
             ).execute()
             return file.get('id')
         except Exception as e:
-            st.error(f"Gagal upload ke Google Drive: {e}")
+            st.error(f"❌ Gagal upload ke Google Drive: {e}")
             return None
     return None
 
@@ -347,7 +368,7 @@ else:
                     if drive_id:
                         st.success("Foto Berhasil Disimpan di Lokal & Google Drive!")
                     else:
-                        st.success("Foto Berhasil Disimpan di Lokal!")
+                        st.warning("Foto Berhasil Disimpan di Lokal, Namun Gagal Terunggah ke Google Drive. Cek Pesan Error di Atas!")
                     st.rerun()
                 else:
                     st.error("Deskripsi dan File Foto Wajib Diisi!")
